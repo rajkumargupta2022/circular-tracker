@@ -162,7 +162,7 @@ export function levelForScore(score: number): ImportanceLevel {
 
 /**
  * Scores a circular against the keyword rules. Deterministic, free, and the
- * only classifier that runs when no Anthropic API key is configured.
+ * only classifier that runs when no Gemini API key is configured.
  */
 export function classifyByRules(circular: NseCircular): Classification {
   const text = `${circular.sub} ${circular.circCategory}`;

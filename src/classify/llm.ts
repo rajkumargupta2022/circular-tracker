@@ -1,4 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI, ThinkingLevel, Type, type GenerateContentConfig, type Schema } from "@google/genai";
 import { config } from "../config.js";
 import { log } from "../logger.js";
 import type { Classification, ImportanceLevel, NseCircular } from "../types.js";
@@ -26,29 +26,43 @@ ROUTINE — informational; no action:
 - Name/address changes, empanelment notices, routine sub-option introductions
 - Anything purely promotional or catalogue-like
 
-Bias toward ROUTINE when the subject is a plain NFO or scheme-availability notice, and toward CRITICAL when a date-bound operational impact is stated or clearly implied.`;
+Bias toward ROUTINE when the subject is a plain NFO or scheme-availability notice, and toward CRITICAL when a date-bound operational impact is stated or clearly implied.
 
-const RESULT_SCHEMA = {
-  type: "object",
+Respond with JSON matching the required schema and nothing else.`;
+
+/**
+ * Gemini's structured-output schema. Note this is Google's `Schema` dialect, not
+ * raw JSON Schema — types are the `Type` enum and `additionalProperties` is not
+ * supported. `propertyOrdering` makes the generation order deterministic.
+ */
+const RESULT_SCHEMA: Schema = {
+  type: Type.OBJECT,
   properties: {
     level: {
-      type: "string",
+      type: Type.STRING,
       enum: ["CRITICAL", "IMPORTANT", "ROUTINE"],
       description: "Importance level for the operations team.",
     },
     reason: {
-      type: "string",
+      type: Type.STRING,
       description: "One sentence explaining the classification, referencing the subject line.",
     },
     tags: {
-      type: "array",
-      items: { type: "string" },
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
       description:
         "Short uppercase tags, e.g. DOWNTIME, SUSPENSION, CUTOFF_CHANGE, NON_BUSINESS_DAY, REGULATORY, RELEASE, ROUTINE_NFO.",
     },
   },
   required: ["level", "reason", "tags"],
-  additionalProperties: false,
+  propertyOrdering: ["level", "reason", "tags"],
+};
+
+const THINKING_LEVELS: Record<string, ThinkingLevel> = {
+  MINIMAL: ThinkingLevel.MINIMAL,
+  LOW: ThinkingLevel.LOW,
+  MEDIUM: ThinkingLevel.MEDIUM,
+  HIGH: ThinkingLevel.HIGH,
 };
 
 interface LlmVerdict {
@@ -64,16 +78,39 @@ function scoreForLevel(level: ImportanceLevel): number {
   return 0;
 }
 
-export class LlmClassifier {
-  private readonly client: Anthropic;
+export class GeminiClassifier {
+  private readonly ai: GoogleGenAI;
+  /**
+   * Thinking controls are model-dependent on Gemini. If the configured model
+   * rejects `thinkingConfig`, we drop it for the rest of the process rather than
+   * failing every classification.
+   */
+  private sendThinkingConfig: boolean;
 
   constructor(apiKey: string) {
-    this.client = new Anthropic({ apiKey });
+    this.ai = new GoogleGenAI({ apiKey });
+    this.sendThinkingConfig = config.classify.thinkingLevel !== "OFF";
   }
 
   /** True when an API key is configured and the fallback can be used. */
   static isAvailable(): boolean {
-    return config.classify.anthropicApiKey.length > 0;
+    return config.classify.geminiApiKey.length > 0;
+  }
+
+  private requestConfig(): GenerateContentConfig {
+    const generateConfig: GenerateContentConfig = {
+      systemInstruction: SYSTEM_PROMPT,
+      responseMimeType: "application/json",
+      responseSchema: RESULT_SCHEMA,
+      // Classification should be reproducible run to run.
+      temperature: 0,
+      maxOutputTokens: 2048,
+    };
+    const level = THINKING_LEVELS[config.classify.thinkingLevel];
+    if (this.sendThinkingConfig && level !== undefined) {
+      generateConfig.thinkingConfig = { thinkingLevel: level };
+    }
+    return generateConfig;
   }
 
   /**
@@ -82,57 +119,59 @@ export class LlmClassifier {
    * the tracker from recording circulars.
    */
   async classify(circular: NseCircular): Promise<Classification | null> {
-    try {
-      const response = await this.client.messages.create({
-        model: config.classify.model,
-        max_tokens: 4096,
-        system: SYSTEM_PROMPT,
-        // Low effort keeps this cheap and fast; thinking stays on (its default on
-        // Opus 5), which avoids the failure modes of disabling it outright.
-        output_config: {
-          effort: "low",
-          format: { type: "json_schema", schema: RESULT_SCHEMA },
-        },
-        messages: [
-          {
-            role: "user",
-            content: [
-              `Circular number: ${circular.circDisplayNo}`,
-              `Date: ${circular.cirDisplayDate}`,
-              `Category: ${circular.circCategory}`,
-              `Subject: ${circular.sub}`,
-            ].join("\n"),
-          },
-        ],
-      });
+    const prompt = [
+      `Circular number: ${circular.circDisplayNo}`,
+      `Date: ${circular.cirDisplayDate}`,
+      `Category: ${circular.circCategory}`,
+      `Subject: ${circular.sub}`,
+    ].join("\n");
 
-      if (response.stop_reason === "refusal") {
-        log.warn(`Claude refused to classify ${circular.circDisplayNo}; keeping rule verdict`);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const response = await this.ai.models.generateContent({
+          model: config.classify.model,
+          contents: prompt,
+          config: this.requestConfig(),
+        });
+
+        const text = response.text;
+        if (!text) {
+          log.warn(
+            `Gemini returned no text for ${circular.circDisplayNo}` +
+              (response.promptFeedback?.blockReason
+                ? ` (blocked: ${response.promptFeedback.blockReason})`
+                : ""),
+          );
+          return null;
+        }
+
+        const verdict = JSON.parse(text) as LlmVerdict;
+        if (!["CRITICAL", "IMPORTANT", "ROUTINE"].includes(verdict.level)) {
+          log.warn(`Gemini returned unknown level ${verdict.level} for ${circular.circDisplayNo}`);
+          return null;
+        }
+
+        return {
+          level: verdict.level,
+          score: scoreForLevel(verdict.level),
+          reasons: [verdict.reason],
+          classifier: "llm",
+          tags: Array.isArray(verdict.tags) ? verdict.tags : [],
+        };
+      } catch (error) {
+        const message = String(error);
+        // Retry once without thinking controls if that's what the model rejected.
+        if (attempt === 0 && this.sendThinkingConfig && /thinking/i.test(message)) {
+          log.warn(
+            `Model ${config.classify.model} rejected thinkingConfig; disabling it and retrying`,
+          );
+          this.sendThinkingConfig = false;
+          continue;
+        }
+        log.warn(`Gemini classification failed for ${circular.circDisplayNo}: ${message}`);
         return null;
       }
-
-      const text = response.content.find((block) => block.type === "text");
-      if (!text || text.type !== "text") {
-        log.warn(`Claude returned no text block for ${circular.circDisplayNo}`);
-        return null;
-      }
-
-      const verdict = JSON.parse(text.text) as LlmVerdict;
-      if (!["CRITICAL", "IMPORTANT", "ROUTINE"].includes(verdict.level)) {
-        log.warn(`Claude returned unknown level ${verdict.level} for ${circular.circDisplayNo}`);
-        return null;
-      }
-
-      return {
-        level: verdict.level,
-        score: scoreForLevel(verdict.level),
-        reasons: [verdict.reason],
-        classifier: "llm",
-        tags: Array.isArray(verdict.tags) ? verdict.tags : [],
-      };
-    } catch (error) {
-      log.warn(`LLM classification failed for ${circular.circDisplayNo}: ${String(error)}`);
-      return null;
     }
+    return null;
   }
 }

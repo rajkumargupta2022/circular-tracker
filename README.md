@@ -21,7 +21,7 @@ cron tick
    │                                     — happens BEFORE classification, so a
    │                                     re-fetch costs nothing and never re-spends
    │                                     LLM tokens
-   ├─ 4. classify the genuinely new      keyword rules first; Claude only for the
+   ├─ 4. classify the genuinely new      keyword rules first; Gemini only for the
    │                                     ambiguous middle band
    ├─ 5. store                            SQLite, one row per circular
    └─ 6. email                            one HTML digest of everything critical or
@@ -110,18 +110,21 @@ routine NFO launches; without them those drift upward on incidental matches.
 Score ≥ `CRITICAL_THRESHOLD` (6) → **CRITICAL**; ≥ `IMPORTANT_THRESHOLD` (3) →
 **IMPORTANT**; otherwise **ROUTINE**.
 
-**Stage 2 — Claude fallback.** Only circulars scoring inside
+**Stage 2 — Gemini fallback.** Only circulars scoring inside
 `LLM_BAND_MIN`..`LLM_BAND_MAX` (default 0–2) go to the model. Score 0 means no
 keyword matched at all, which in practice is the genuinely uncertain set —
 "Merger of certain schemes of …", "Change in minimum amount under SIP". Clearly
 negative scores are confidently routine and never reach the model.
 
-Uses `claude-opus-5` at `effort: "low"` with a JSON schema via
-`output_config.format`, so the verdict is always well-formed. **If the API call
-fails or the model refuses, the deterministic rule verdict stands** — a
-classifier outage can never stop circulars being recorded.
+Uses `gemini-3.6-flash` (`GEMINI_MODEL`) via `@google/genai`, with
+`responseMimeType: "application/json"` plus a `responseSchema`, so the verdict is
+always well-formed. `temperature: 0` keeps it reproducible, and
+`GEMINI_THINKING_LEVEL` (default `LOW`) controls how much the model deliberates —
+set it to `OFF` to omit thinking controls entirely. **If the API call fails or the
+response is blocked, the deterministic rule verdict stands** — a classifier
+outage can never stop circulars being recorded.
 
-Leave `ANTHROPIC_API_KEY` empty to run on keyword rules alone. Everything still
+Leave `GEMINI_API_KEY` empty to run on keyword rules alone. Everything still
 works; you just lose the judgment call on the ambiguous band.
 
 ### Tuning

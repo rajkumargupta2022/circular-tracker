@@ -1,13 +1,13 @@
 import { config } from "../config.js";
 import { log } from "../logger.js";
 import type { Classification, NseCircular } from "../types.js";
-import { LlmClassifier } from "./llm.js";
+import { GeminiClassifier } from "./llm.js";
 import { classifyByRules, isAmbiguous } from "./rules.js";
 
 export { RULES, classifyByRules, levelForScore } from "./rules.js";
 
 /**
- * Rules first, Claude only for the ambiguous middle band.
+ * Rules first, Gemini only for the ambiguous middle band.
  *
  * The rule pass is deterministic and free, so it decides the clear cases: a
  * strongly negative score is a routine NFO notice, a strongly positive one is a
@@ -15,14 +15,14 @@ export { RULES, classifyByRules, levelForScore } from "./rules.js";
  * single keyword tipped the balance — are worth an API call.
  */
 export class Classifier {
-  private readonly llm: LlmClassifier | null;
+  private readonly llm: GeminiClassifier | null;
 
   constructor() {
-    this.llm = LlmClassifier.isAvailable()
-      ? new LlmClassifier(config.classify.anthropicApiKey)
+    this.llm = GeminiClassifier.isAvailable()
+      ? new GeminiClassifier(config.classify.geminiApiKey)
       : null;
     if (!this.llm) {
-      log.debug("ANTHROPIC_API_KEY not set — running on keyword rules only");
+      log.debug("GEMINI_API_KEY not set — running on keyword rules only");
     }
   }
 
@@ -34,7 +34,7 @@ export class Classifier {
     }
 
     log.debug(
-      `Rule score ${ruleVerdict.score} is ambiguous for ${circular.circDisplayNo}; asking Claude`,
+      `Rule score ${ruleVerdict.score} is ambiguous for ${circular.circDisplayNo}; asking Gemini`,
     );
     const llmVerdict = await this.llm.classify(circular);
     if (!llmVerdict) return ruleVerdict;

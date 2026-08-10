@@ -95,8 +95,11 @@ export const config = {
     importantThreshold: num("IMPORTANT_THRESHOLD", 3),
     llmBandMin: num("LLM_BAND_MIN", 0),
     llmBandMax: num("LLM_BAND_MAX", 2),
-    anthropicApiKey: str("ANTHROPIC_API_KEY", ""),
-    model: str("ANTHROPIC_MODEL", "claude-opus-5"),
+    // GOOGLE_API_KEY is the name the Google SDK itself looks for, so accept both.
+    geminiApiKey: str("GEMINI_API_KEY", str("GOOGLE_API_KEY", "")),
+    model: str("GEMINI_MODEL", "gemini-3.6-flash"),
+    // MINIMAL | LOW | MEDIUM | HIGH, or OFF to omit thinking controls entirely.
+    thinkingLevel: str("GEMINI_THINKING_LEVEL", "LOW").toUpperCase(),
   },
   logLevel: str("LOG_LEVEL", "info"),
 };
