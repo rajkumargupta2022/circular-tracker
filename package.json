@@ -1,0 +1,34 @@
+{
+  "name": "nse-circular-tracker",
+  "version": "1.0.0",
+  "description": "Daily tracker for NSE Mutual Fund department circulars with importance classification and email alerts",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "nse-circulars": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli.js start",
+    "dev": "tsx src/cli.ts",
+    "run-once": "node dist/cli.js run",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.116.0",
+    "better-sqlite3": "^11.7.0",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.9.16"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.2",
+    "@types/node-cron": "^3.0.11",
+    "@types/nodemailer": "^6.4.17",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
