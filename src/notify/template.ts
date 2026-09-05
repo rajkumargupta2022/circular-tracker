@@ -8,17 +8,19 @@ const LEVEL_STYLE: Record<ImportanceLevel, { accent: string; bg: string; label: 
   ROUTINE: { accent: "#475467", bg: "#f9fafb", label: "Routine" },
 };
 
-function escapeHtml(value: string): string {
-  return value
+// Rows stored before the fetch layer normalized nulls can still carry them, so
+// the digest must render a partial circular rather than fail the whole run.
+function escapeHtml(value: string | null | undefined): string {
+  return (value ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
 
-function parseJsonArray(raw: string): string[] {
+function parseJsonArray(raw: string | null | undefined): string[] {
   try {
-    const parsed: unknown = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw ?? "");
     return Array.isArray(parsed) ? parsed.map(String) : [];
   } catch {
     return [];
@@ -81,7 +83,7 @@ export function buildHtml(circulars: StoredCircular[]): string {
             ${reasonHtml}
             ${tagHtml}
             <div style="margin-top:12px;">
-              <a href="${escapeHtml(circular.circFilelink)}" style="font:600 13px/1.5 -apple-system,Segoe UI,sans-serif;color:#175cd3;text-decoration:none;">Download circular (${escapeHtml(circular.fileExt.toUpperCase())}) &rarr;</a>
+              <a href="${escapeHtml(circular.circFilelink)}" style="font:600 13px/1.5 -apple-system,Segoe UI,sans-serif;color:#175cd3;text-decoration:none;">Download circular${circular.fileExt ? ` (${escapeHtml(circular.fileExt.toUpperCase())})` : ""} &rarr;</a>
             </div>
           </td></tr>
         </table>

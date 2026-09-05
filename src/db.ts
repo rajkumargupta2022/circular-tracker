@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS circulars (
 CREATE INDEX IF NOT EXISTS idx_circulars_date  ON circulars (cir_date DESC);
 CREATE INDEX IF NOT EXISTS idx_circulars_level ON circulars (importance_level);
 CREATE INDEX IF NOT EXISTS idx_circulars_notified ON circulars (notified_at);
+-- filterUnseen keys off the circular number on every run.
+CREATE INDEX IF NOT EXISTS idx_circulars_number ON circulars (circ_number);
 
 -- One row per (document, version) ever seen, so the table doubles as an audit
 -- trail of how the API spec has moved over time.
@@ -130,20 +132,61 @@ export class CircularStore {
   }
 
   /**
-   * Of the given circular numbers, returns the subset we've never stored.
+   * Of the given circulars, returns the subset we've never stored.
    * Called before classification so a re-fetch of the same window never
    * re-classifies (and never re-spends LLM tokens on) circulars we already know.
+   *
+   * Identity here is the circular *number*, not the display number. NSE has been
+   * seen serving one circular with an empty `circDisplayNo` on one request and
+   * correctly on the next; keying on the display number would store the
+   * synthesized copy and the real copy as two circulars and email both.
    */
   filterUnseen(circulars: NseCircular[]): NseCircular[] {
     if (circulars.length === 0) return [];
     const placeholders = circulars.map(() => "?").join(",");
     const rows = this.db
-      .prepare<string[], { circ_display_no: string }>(
-        `SELECT circ_display_no FROM circulars WHERE circ_display_no IN (${placeholders})`,
+      .prepare<string[], { circ_display_no: string; circ_number: string; file_ext: string | null }>(
+        `SELECT circ_display_no, circ_number, file_ext FROM circulars WHERE circ_number IN (${placeholders})`,
       )
-      .all(...circulars.map((c) => c.circDisplayNo));
-    const known = new Set(rows.map((row) => row.circ_display_no));
-    return circulars.filter((c) => !known.has(c.circDisplayNo));
+      .all(...circulars.map((c) => c.circNumber));
+    const stored = new Map(rows.map((row) => [row.circ_number, row]));
+
+    return circulars.filter((circular) => {
+      const known = stored.get(circular.circNumber);
+      if (known === undefined) return true;
+      // Same circular, better copy: adopt NSE's real identity and download link.
+      if (!known.file_ext && circular.fileExt) {
+        this.replaceFileDetails(known.circ_display_no, circular);
+      }
+      return false;
+    });
+  }
+
+  /**
+   * Rewrites the identity and file columns of an already-stored circular from a
+   * better copy of the same circular. Deliberately leaves the classification and
+   * the notified flag alone: the subject line did not change, so the verdict
+   * stands and the alert must not be re-sent.
+   */
+  private replaceFileDetails(storedDisplayNo: string, circular: NseCircular): void {
+    this.db
+      .prepare(
+        `UPDATE circulars SET
+           circ_display_no = @circ_display_no, circ_filelink = @circ_filelink,
+           circ_filename = @circ_filename, file_dept = @file_dept, file_ext = @file_ext
+         WHERE circ_display_no = @stored_display_no`,
+      )
+      .run({
+        circ_display_no: circular.circDisplayNo,
+        circ_filelink: circular.circFilelink,
+        circ_filename: circular.circFilename,
+        file_dept: circular.fileDept,
+        file_ext: circular.fileExt,
+        stored_display_no: storedDisplayNo,
+      });
+    log.info(
+      `Upgraded ${storedDisplayNo} to ${circular.circDisplayNo} — NSE re-served it with file details`,
+    );
   }
 
   /** Inserts a classified circular. Returns false if it was already present. */

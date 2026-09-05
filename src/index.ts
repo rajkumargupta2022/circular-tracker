@@ -11,7 +11,9 @@ import { withPersistentState } from "./storage/state.js";
  */
 export function startScheduler(): void {
   if (!cron.validate(config.cron.schedule)) {
-    throw new Error(`CRON_SCHEDULE is not a valid cron expression: ${config.cron.schedule}`);
+    throw new Error(
+      `CRON_SCHEDULE is not a valid cron expression: ${config.cron.schedule}`,
+    );
   }
 
   let running = false;
@@ -32,18 +34,28 @@ export function startScheduler(): void {
           `${summary.fetched} fetched, ${summary.inserted} new ` +
           `(${summary.byLevel.CRITICAL} critical / ${summary.byLevel.IMPORTANT} important / ${summary.byLevel.ROUTINE} routine), ` +
           `${summary.notified} emailed` +
-          (summary.apiDocUpgrades > 0 ? `; ${summary.apiDocUpgrades} API doc update(s)` : ""),
+          (summary.apiDocUpgrades > 0
+            ? `; ${summary.apiDocUpgrades} API doc update(s)`
+            : ""),
       );
     } catch (error) {
-      log.error(`Run failed: ${String(error)}`);
+      // The stack matters here: this is the only record of a failed unattended
+      // run, and the scheduler swallows the error to stay alive.
+      const detail =
+        error instanceof Error ? (error.stack ?? error.message) : String(error);
+      log.error(`Run failed: ${detail}`);
     } finally {
       running = false;
     }
   };
 
-  const task = cron.schedule(config.cron.schedule, () => void tick("scheduled"), {
-    timezone: config.cron.timezone,
-  });
+  const task = cron.schedule(
+    config.cron.schedule,
+    () => void tick("scheduled"),
+    {
+      timezone: config.cron.timezone,
+    },
+  );
 
   log.info(
     `Scheduler started — cron "${config.cron.schedule}" (${config.cron.timezone}), dept=${config.nse.dept}, lookback=${config.nse.lookbackDays}d`,

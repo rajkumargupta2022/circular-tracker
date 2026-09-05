@@ -20,10 +20,79 @@ export function daysAgo(days: number, from = new Date()): Date {
   return out;
 }
 
-function isCircular(value: unknown): value is NseCircular {
-  if (typeof value !== "object" || value === null) return false;
+function asText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+interface NormalizedCircular {
+  circular: NseCircular;
+  /** True when we derived `circDisplayNo` because NSE did not supply one. */
+  synthesizedId: boolean;
+}
+
+/**
+ * NSE occasionally serves a botched record: nulls where strings belong
+ * (`fileExt`, `fileDept`) and an empty `circDisplayNo`. The circular itself is
+ * real — it has a subject and a number — so we coerce rather than drop, because
+ * dropping means never alerting on it.
+ *
+ * Two things must not escape this function: a null (nothing downstream expects
+ * one, and the DB columns are typed `string`), and an empty display number
+ * (it is the primary key, so every malformed record would collide on "" and be
+ * silently swallowed as a duplicate).
+ */
+function normalizeCircular(value: unknown, dept: string): NormalizedCircular | null {
+  if (typeof value !== "object" || value === null) return null;
   const record = value as Record<string, unknown>;
-  return typeof record["circDisplayNo"] === "string" && typeof record["sub"] === "string";
+
+  const sub = asText(record["sub"]);
+  const displayNo = asText(record["circDisplayNo"]);
+  const circNumber = asText(record["circNumber"]);
+  // No subject means nothing to classify; no identity at all means nothing to
+  // store against. Either way the record is unusable.
+  if (sub === "" || (displayNo === "" && circNumber === "")) return null;
+
+  const fileDept = asText(record["fileDept"]);
+
+  return {
+    synthesizedId: displayNo === "",
+    circular: {
+      cirDate: asText(record["cirDate"]),
+      cirDisplayDate: asText(record["cirDisplayDate"]),
+      circCategory: asText(record["circCategory"]),
+      circCompany: asText(record["circCompany"]),
+      circDepartment: asText(record["circDepartment"]),
+      circDisplayNo: displayNo || `NSE/${fileDept || dept}/${circNumber}`,
+      circFileSize: asText(record["circFileSize"]),
+      circFilelink: asText(record["circFilelink"]),
+      circFilename: asText(record["circFilename"]),
+      circNumber,
+      fileDept,
+      fileExt: asText(record["fileExt"]),
+      sub,
+    },
+  };
+}
+
+/**
+ * NSE has been observed serving the same circular twice in one response: once
+ * botched and once correct. The two copies carry different display numbers
+ * (the synthesized one cannot reproduce NSE's `fileDept` segment), so they
+ * would be stored as two circulars and emailed twice. Match them on the
+ * circular number instead and keep the copy NSE actually identified.
+ */
+function selectCirculars(data: unknown[], dept: string): NseCircular[] {
+  const normalized = data
+    .map((entry) => normalizeCircular(entry, dept))
+    .filter((entry): entry is NormalizedCircular => entry !== null);
+
+  const identified = new Set(
+    normalized.filter((entry) => !entry.synthesizedId).map((entry) => entry.circular.circNumber),
+  );
+
+  return normalized
+    .filter((entry) => !entry.synthesizedId || !identified.has(entry.circular.circNumber))
+    .map((entry) => entry.circular);
 }
 
 export class NseClient {
@@ -70,9 +139,11 @@ export class NseClient {
           throw new Error("NSE response had no `data` array");
         }
 
-        const circulars = data.filter(isCircular);
+        const circulars = selectCirculars(data, dept);
         if (circulars.length !== data.length) {
-          log.warn(`Dropped ${data.length - circulars.length} malformed circular records`);
+          log.warn(
+            `Dropped ${data.length - circulars.length} unusable or duplicated circular record(s)`,
+          );
         }
         log.debug(
           `Fetched ${circulars.length} circulars for ${params.get("fromDate")}..${params.get("toDate")} dept=${dept}`,
