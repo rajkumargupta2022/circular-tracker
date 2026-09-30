@@ -1,13 +1,14 @@
 import nodemailer, { type Transporter } from "nodemailer";
 import { assertMailConfigured, config } from "../config.js";
 import { log } from "../logger.js";
-import type { StoredCircular } from "../types.js";
+import type { StoredBseCircular, StoredCircular } from "../types.js";
 import {
   buildApiDocHtml,
   buildApiDocSubject,
   buildApiDocText,
   type ApiDocAlertEntry,
 } from "./apidoc-template.js";
+import { buildBseHtml, buildBseSubject, buildBseText } from "./bse-template.js";
 import { buildHtml, buildSubject, buildText } from "./template.js";
 
 let cached: Transporter | null = null;
@@ -26,7 +27,7 @@ function transporter(): Transporter {
 
 /**
  * Sends the digest for a set of newly-stored circulars.
- * Returns true when the message was handed to the SMTP server (or logged in dry-run).
+ * Returns true only when the message was handed to the SMTP server.
  */
 export async function sendDigest(circulars: StoredCircular[]): Promise<boolean> {
   if (circulars.length === 0) return false;
@@ -38,7 +39,7 @@ export async function sendDigest(circulars: StoredCircular[]): Promise<boolean> 
   if (config.mail.dryRun) {
     log.info(`[dry-run] Would email ${config.mail.to.join(", ") || "(no recipients)"}: ${subject}`);
     log.debug(`[dry-run] Body:\n${text}`);
-    return true;
+    return false;
   }
 
   const info = await transporter().sendMail({
@@ -51,6 +52,41 @@ export async function sendDigest(circulars: StoredCircular[]): Promise<boolean> 
   });
 
   log.info(`Emailed ${circulars.length} circular(s) to ${config.mail.to.join(", ")} (${info.messageId})`);
+  return true;
+}
+
+/**
+ * Swaps the leading exchange name in MAIL_FROM's display name, e.g.
+ * "NSE Circular Tracker <a@b.com>" -> "BSE Circular Tracker <a@b.com>".
+ * Falls back to the configured address unchanged if it doesn't start with "NSE".
+ */
+function senderFor(exchange: "NSE" | "BSE"): string {
+  return config.mail.from.replace(/^NSE\b/, exchange);
+}
+
+/** Sends one email per newly detected BSE downtime circular, using the BSE template. */
+export async function sendBseDowntimeAlert(circular: StoredBseCircular): Promise<boolean> {
+  const circulars = [circular];
+  const subject = buildBseSubject(circulars);
+  const html = buildBseHtml(circulars);
+  const text = buildBseText(circulars);
+  const from = senderFor("BSE");
+
+  if (config.mail.dryRun) {
+    log.info(`[dry-run] Would email ${config.mail.to.join(", ") || "(no recipients)"} from "${from}": ${subject}`);
+    log.debug(`[dry-run] Body:\n${text}`);
+    return false;
+  }
+
+  const info = await transporter().sendMail({
+    from,
+    to: config.mail.to,
+    cc: config.mail.cc.length > 0 ? config.mail.cc : undefined,
+    subject,
+    text,
+    html,
+  });
+  log.info(`Emailed BSE downtime notice ${circular.noticeNo} to ${config.mail.to.join(", ")} (${info.messageId})`);
   return true;
 }
 
@@ -69,7 +105,7 @@ export async function sendApiDocAlert(entries: ApiDocAlertEntry[]): Promise<bool
   if (config.mail.dryRun) {
     log.info(`[dry-run] Would email ${config.mail.to.join(", ") || "(no recipients)"}: ${subject}`);
     log.debug(`[dry-run] Body:\n${text}`);
-    return true;
+    return false;
   }
 
   const info = await transporter().sendMail({

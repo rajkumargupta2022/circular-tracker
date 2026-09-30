@@ -112,6 +112,7 @@ export class NseClient {
     const url = `${API_BASE}?${params.toString()}`;
 
     let lastError: unknown;
+     console.log(`Fetching NSE circulars for =====================>${url}`);
     for (let attempt = 1; attempt <= config.nse.maxRetries; attempt++) {
       try {
         const response = await this.session.apiGet(url);

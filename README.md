@@ -1,6 +1,7 @@
 # NSE Circular Tracker
 
-Watches two things on a daily schedule and emails stakeholders when either moves:
+Watches NSE and BSE Mutual Fund circulars on a daily schedule, and tracks changes
+to the NSE MF Desk API specification:
 
 1. **Mutual Fund circulars** on NSE India — stored in SQLite, scored for
    operational importance, alerting on downtime, suspensions, cut-off changes and
@@ -10,6 +11,10 @@ Watches two things on a daily schedule and emails stakeholders when either moves
    "API STRUCTURE" menu on [nseinvest.com](https://www.nseinvest.com/nsemfdesk/login.htm).
    When the version number goes up, you get an email with a link to the new
    document.
+3. **Mutual Fund circulars on BSE India** — stored separately in SQLite and
+  deduplicated by notice number. The latest seven calendar days are checked on each run;
+  each new subject containing "downtime" triggers an individual email with its
+  subject and circular link.
 
 ## How it works
 
@@ -19,18 +24,21 @@ cron tick
    ├─ 1. bootstrap an NSE session       cookies from the circulars page (the API
    │                                     403s without them; the homepage 403s too,
    │                                     so the circulars page is the entry point)
-   ├─ 2. fetch a rolling window          last NSE_LOOKBACK_DAYS days, so a missed
+  ├─ 2. fetch BSE circulars             last seven calendar days through today;
+  │                                     store notices separately and email new
+  │                                     downtime subjects individually
+  ├─ 3. fetch an NSE rolling window     last NSE_LOOKBACK_DAYS days, so a missed
    │                                     run self-heals on the next one
-   ├─ 3. drop what we already have       matched on circular number (NSE/NMF/75630)
+  ├─ 4. drop what we already have       matched on circular number (NSE/NMF/75630)
    │                                     — happens BEFORE classification, so a
    │                                     re-fetch costs nothing and never re-spends
    │                                     LLM tokens
-   ├─ 4. classify the genuinely new      keyword rules first; Gemini only for the
+  ├─ 5. classify the genuinely new      keyword rules first; Gemini only for the
    │                                     ambiguous middle band
-   ├─ 5. store                            SQLite, one row per circular
-   ├─ 6. email                            one HTML digest of everything critical or
+  ├─ 6. store                            SQLite, one row per NSE circular
+  ├─ 7. email                            one HTML digest of everything critical or
    │                                      important that hasn't been sent yet
-   └─ 7. check the API doc version        scrape nseinvest.com, compare against the
+  └─ 8. check the API doc version        scrape nseinvest.com, compare against the
                                           last version seen, email if it went up
 ```
 
@@ -44,6 +52,7 @@ Scheduler, with Cloud Build redeploying on every push to `main`.
 
 ```bash
 npm install
+npx playwright install chromium
 cp .env.example .env      # then edit it
 npm run build
 ```
@@ -97,6 +106,14 @@ node dist/cli.js backfill --days 180
 | `test-email` | Verify SMTP and send a test message |
 
 Add `MAIL_DRY_RUN=true` to any command to log the email instead of sending it.
+
+BSE uses `BSE_SEGMENT` (default `Mutual Fund`), `BSE_MAX_RETRIES` and
+`BSE_RETRY_DELAY_SECONDS` for its API request settings. BSE alerts are independent
+of NSE classification and send one message per new downtime notice. A failed BSE
+fetch is recorded separately and does not prevent the NSE cycle; failed alert
+sends remain pending for the next run. BSE's API blocks direct Node requests, so
+the BSE client fetches through Chromium; the Docker image includes Chromium and
+a virtual display for the scheduled job.
 
 ## Importance classification
 

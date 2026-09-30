@@ -72,6 +72,11 @@ export const config = {
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
     ),
   },
+  bse: {
+    segment: str("BSE_SEGMENT", "Mutual Fund"),
+    retryDelayMs: num("BSE_RETRY_DELAY_SECONDS", 5) * 1000,
+    maxRetries: num("BSE_MAX_RETRIES", 4),
+  },
   apiDoc: {
     enabled: bool("TRACK_API_DOCS", true),
     pageUrl: str("APIDOC_PAGE_URL", "https://www.nseinvest.com/nsemfdesk/login.htm"),

@@ -15,6 +15,20 @@ export interface NseCircular {
   sub: string; // subject line — the only text we get without downloading the file
 }
 
+/** A normalized circular notice from the BSE Mutual Fund API. */
+export interface BseCircular {
+  noticeNo: string;
+  noticeDate: string;
+  subject: string;
+  fileName: string;
+  payload: string;
+}
+
+export interface StoredBseCircular extends BseCircular {
+  first_seen_at: string;
+  notified_at: string | null;
+}
+
 export type ImportanceLevel = "CRITICAL" | "IMPORTANT" | "ROUTINE";
 
 export interface Classification {

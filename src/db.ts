@@ -6,8 +6,10 @@ import { log } from "./logger.js";
 import type {
   ApiDoc,
   Classification,
+  BseCircular,
   ImportanceLevel,
   NseCircular,
+  StoredBseCircular,
   StoredApiDoc,
   StoredCircular,
 } from "./types.js";
@@ -41,6 +43,19 @@ CREATE INDEX IF NOT EXISTS idx_circulars_level ON circulars (importance_level);
 CREATE INDEX IF NOT EXISTS idx_circulars_notified ON circulars (notified_at);
 -- filterUnseen keys off the circular number on every run.
 CREATE INDEX IF NOT EXISTS idx_circulars_number ON circulars (circ_number);
+
+CREATE TABLE IF NOT EXISTS bse_circulars (
+  notice_no     TEXT PRIMARY KEY,
+  notice_date   TEXT NOT NULL,
+  subject       TEXT NOT NULL,
+  file_name     TEXT NOT NULL,
+  payload_json  TEXT NOT NULL,
+  first_seen_at TEXT NOT NULL,
+  notified_at   TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_bse_circulars_date ON bse_circulars (notice_date DESC);
+CREATE INDEX IF NOT EXISTS idx_bse_circulars_notified ON bse_circulars (notified_at);
 
 -- One row per (document, version) ever seen, so the table doubles as an audit
 -- trail of how the API spec has moved over time.
@@ -92,6 +107,28 @@ interface CircularRow {
   importance_reasons: string;
   importance_tags: string;
   classifier: string;
+}
+
+interface BseCircularRow {
+  notice_no: string;
+  notice_date: string;
+  subject: string;
+  file_name: string;
+  payload_json: string;
+  first_seen_at: string;
+  notified_at: string | null;
+}
+
+function toStoredBse(row: BseCircularRow): StoredBseCircular {
+  return {
+    noticeNo: row.notice_no,
+    noticeDate: row.notice_date,
+    subject: row.subject,
+    fileName: row.file_name,
+    payload: row.payload_json,
+    first_seen_at: row.first_seen_at,
+    notified_at: row.notified_at,
+  };
 }
 
 function toStored(row: CircularRow): StoredCircular {
@@ -227,6 +264,48 @@ export class CircularStore {
         classifier: verdict.classifier,
       });
     return result.changes > 0;
+  }
+
+  /** Stores a BSE notice once, retaining the source payload for later inspection. */
+  insertBse(circular: BseCircular): boolean {
+    const result = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO bse_circulars (
+          notice_no, notice_date, subject, file_name, payload_json, first_seen_at, notified_at
+        ) VALUES (?, ?, ?, ?, ?, ?, NULL)`,
+      )
+      .run(
+        circular.noticeNo,
+        circular.noticeDate,
+        circular.subject,
+        circular.fileName,
+        circular.payload,
+        new Date().toISOString(),
+      );
+    return result.changes > 0;
+  }
+
+  /** Downtime notices not yet emailed; failed sends remain pending for retry. */
+  pendingBseDowntime(): StoredBseCircular[] {
+    return this.db
+      .prepare<[], BseCircularRow>(
+        `SELECT * FROM bse_circulars
+         WHERE notified_at IS NULL AND instr(lower(subject), 'downtime') > 0
+         ORDER BY notice_date DESC, notice_no DESC`,
+      )
+      .all()
+      .map(toStoredBse);
+  }
+
+  markBseNotified(noticeNos: string[]): void {
+    if (noticeNos.length === 0) return;
+    const stamp = new Date().toISOString();
+    const statement = this.db.prepare(
+      "UPDATE bse_circulars SET notified_at = ? WHERE notice_no = ?",
+    );
+    this.db.transaction((numbers: string[]) => {
+      for (const number of numbers) statement.run(stamp, number);
+    })(noticeNos);
   }
 
   /** Circulars stored but never emailed. This is what an alert run sends. */

@@ -1,5 +1,8 @@
 import type { ImportanceLevel, StoredCircular } from "../types.js";
 
+/** Which exchange the circulars came from; only changes the labels. */
+export type Exchange = "NSE" | "BSE";
+
 const LEVEL_ORDER: ImportanceLevel[] = ["CRITICAL", "IMPORTANT", "ROUTINE"];
 
 const LEVEL_STYLE: Record<ImportanceLevel, { accent: string; bg: string; label: string }> = {
@@ -36,7 +39,7 @@ function groupByLevel(circulars: StoredCircular[]): Map<ImportanceLevel, StoredC
   return groups;
 }
 
-export function buildSubject(circulars: StoredCircular[]): string {
+export function buildSubject(circulars: StoredCircular[], exchange: Exchange = "NSE"): string {
   const critical = circulars.filter((c) => c.importance_level === "CRITICAL").length;
   const important = circulars.filter((c) => c.importance_level === "IMPORTANT").length;
   const parts: string[] = [];
@@ -44,10 +47,10 @@ export function buildSubject(circulars: StoredCircular[]): string {
   if (important > 0) parts.push(`${important} important`);
   const detail = parts.length > 0 ? parts.join(", ") : `${circulars.length} new`;
   const prefix = critical > 0 ? "[ACTION NEEDED] " : "";
-  return `${prefix}NSE MF circulars — ${detail}`;
+  return `${prefix}${exchange} MF circulars — ${detail}`;
 }
 
-export function buildHtml(circulars: StoredCircular[]): string {
+export function buildHtml(circulars: StoredCircular[], exchange: Exchange = "NSE"): string {
   const groups = groupByLevel(circulars);
   const generatedAt = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
 
@@ -78,7 +81,10 @@ export function buildHtml(circulars: StoredCircular[]): string {
             <div style="font:600 13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:${style.accent};">${escapeHtml(circular.circDisplayNo)}</div>
             <div style="margin-top:6px;font:600 15px/1.5 -apple-system,Segoe UI,sans-serif;color:#101828;">${escapeHtml(circular.sub)}</div>
             <div style="margin-top:8px;font:400 12px/1.6 -apple-system,Segoe UI,sans-serif;color:#667085;">
-              ${escapeHtml(circular.cirDisplayDate)} &nbsp;·&nbsp; ${escapeHtml(circular.circDepartment)} &nbsp;·&nbsp; ${escapeHtml(circular.circCategory)} &nbsp;·&nbsp; ${escapeHtml(circular.circFileSize)}
+              ${[circular.cirDisplayDate, circular.circDepartment, circular.circCategory, circular.circFileSize]
+                .filter(Boolean)
+                .map(escapeHtml)
+                .join(" &nbsp;·&nbsp; ")}
             </div>
             ${reasonHtml}
             ${tagHtml}
@@ -108,7 +114,7 @@ export function buildHtml(circulars: StoredCircular[]): string {
     <tr><td align="center">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;">
         <tr><td style="padding-bottom:18px;">
-          <div style="font:700 20px/1.4 -apple-system,Segoe UI,sans-serif;color:#101828;">NSE Mutual Fund circulars</div>
+          <div style="font:700 20px/1.4 -apple-system,Segoe UI,sans-serif;color:#101828;">${exchange} Mutual Fund circulars</div>
           <div style="margin-top:4px;font:400 13px/1.6 -apple-system,Segoe UI,sans-serif;color:#667085;">
             ${circulars.length} new circular${circulars.length === 1 ? "" : "s"} detected &middot; ${escapeHtml(generatedAt)} IST
           </div>
@@ -125,10 +131,10 @@ export function buildHtml(circulars: StoredCircular[]): string {
 </body></html>`;
 }
 
-export function buildText(circulars: StoredCircular[]): string {
+export function buildText(circulars: StoredCircular[], exchange: Exchange = "NSE"): string {
   const groups = groupByLevel(circulars);
   const lines: string[] = [
-    `NSE Mutual Fund circulars — ${circulars.length} new`,
+    `${exchange} Mutual Fund circulars — ${circulars.length} new`,
     new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) + " IST",
     "",
   ];

@@ -1,10 +1,11 @@
 import { checkApiDocs, notifyApiDocChanges } from "./apidoc/tracker.js";
+import { BseClient, bseDaysAgo, formatBseDate } from "./bse/client.js";
 import { Classifier } from "./classify/index.js";
 import { config } from "./config.js";
 import { CircularStore } from "./db.js";
 import { log } from "./logger.js";
 import { NseClient, daysAgo, formatNseDate } from "./nse/client.js";
-import { sendDigest } from "./notify/mailer.js";
+import { sendBseDowntimeAlert, sendDigest } from "./notify/mailer.js";
 import type { ImportanceLevel, RunSummary } from "./types.js";
 
 export interface RunOptions {
@@ -56,6 +57,13 @@ export async function runOnce(options: RunOptions = {}): Promise<RunSummary> {
   };
 
   try {
+    // Run BSE independently and first, so an NSE error cannot skip its daily fetch.
+    try {
+      await runBseOnce(store, to);
+    } catch (error) {
+      log.error(`BSE run failed (NSE circulars were unaffected): ${String(error)}`);
+    }
+
     log.info(`Fetching NSE ${config.nse.dept} circulars for ${windowFrom} .. ${windowTo}`);
     const fetched = await new NseClient().fetchCirculars(from, to);
     summary.fetched = fetched.length;
@@ -116,6 +124,47 @@ export async function runOnce(options: RunOptions = {}): Promise<RunSummary> {
     throw error;
   } finally {
     if (ownsStore) store.close();
+  }
+}
+
+async function runBseOnce(store: CircularStore, to: Date): Promise<void> {
+  const from = bseDaysAgo(7, to);
+  const windowFrom = formatBseDate(from);
+  const windowTo = formatBseDate(to);
+  const runId = store.startRun(windowFrom, windowTo);
+  const summary = { fetched: 0, inserted: 0, duplicates: 0, notified: 0 };
+
+  try {
+    const fetched = await new BseClient().fetchCirculars(from, to);
+    summary.fetched = fetched.length;
+    for (const circular of fetched) {
+      if (store.insertBse(circular)) summary.inserted += 1;
+      else summary.duplicates += 1;
+    }
+
+    for (const circular of store.pendingBseDowntime()) {
+      if (!circular.fileName) {
+        log.warn(`BSE downtime notice ${circular.noticeNo} has no circular URL; leaving it pending`);
+        continue;
+      }
+      try {
+        if (await sendBseDowntimeAlert(circular)) {
+          store.markBseNotified([circular.noticeNo]);
+          summary.notified += 1;
+        }
+      } catch (error) {
+        // Leave it pending so a transient SMTP error is retried on the next run.
+        log.error(`Failed to email BSE downtime notice ${circular.noticeNo}: ${String(error)}`);
+      }
+    }
+
+    log.info(
+      `BSE run complete: ${summary.fetched} fetched, ${summary.inserted} new, ${summary.duplicates} duplicates, ${summary.notified} downtime notice(s) emailed`,
+    );
+    store.finishRun(runId, summary);
+  } catch (error) {
+    store.finishRun(runId, summary, String(error));
+    throw error;
   }
 }
 
