@@ -222,7 +222,7 @@ async function dispatch(command: string, args: string[]): Promise<void> {
 
     case "peek": {
       // Undocumented helper: fetch and score without touching the database.
-      const days = numericFlag(args, "days", 7);
+      const days = numericFlag(args, "days", config.bse.lookbackDays);
       const circulars = await new NseClient().fetchCirculars(daysAgo(days), new Date());
       for (const circular of circulars) {
         const verdict = classifyByRules(circular);

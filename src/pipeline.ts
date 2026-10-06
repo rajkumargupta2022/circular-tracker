@@ -1,11 +1,12 @@
 import { checkApiDocs, notifyApiDocChanges } from "./apidoc/tracker.js";
+import { BseClient } from "./bse/client.js";
 import { Classifier } from "./classify/index.js";
 import { config } from "./config.js";
 import { CircularStore } from "./db.js";
 import { log } from "./logger.js";
 import { NseClient, daysAgo, formatNseDate } from "./nse/client.js";
 import { sendDigest } from "./notify/mailer.js";
-import type { ImportanceLevel, RunSummary } from "./types.js";
+import type { ImportanceLevel, NseCircular, RunSummary } from "./types.js";
 
 export interface RunOptions {
   /** Window start. Defaults to NSE_LOOKBACK_DAYS before today. */
@@ -56,8 +57,28 @@ export async function runOnce(options: RunOptions = {}): Promise<RunSummary> {
   };
 
   try {
+    // Each exchange is fetched independently so one outage cannot cost us the
+    // other's circulars; only a total failure fails the run.
+    const fetched: NseCircular[] = [];
+    const failures: string[] = [];
+
     log.info(`Fetching NSE ${config.nse.dept} circulars for ${windowFrom} .. ${windowTo}`);
-    const fetched = await new NseClient().fetchCirculars(from, to);
+    try {
+      fetched.push(...(await new NseClient().fetchCirculars(from, to)));
+    } catch (error) {
+      failures.push(`NSE: ${String(error)}`);
+      log.error(`NSE fetch failed (continuing with other exchanges): ${String(error)}`);
+    }
+
+    log.info(`Fetching BSE ${config.bse.segment} circulars for ${windowFrom} .. ${windowTo}`);
+    try {
+      fetched.push(...(await new BseClient().fetchCirculars(from, to)));
+    } catch (error) {
+      failures.push(`BSE: ${String(error)}`);
+      log.error(`BSE fetch failed (continuing with other exchanges): ${String(error)}`);
+    }
+
+    if (failures.length === 2) throw new Error(`All exchange fetches failed — ${failures.join("; ")}`);
     summary.fetched = fetched.length;
 
     const unseen = store.filterUnseen(fetched);
