@@ -57,7 +57,7 @@ export function normalizeBseNotice(value: unknown): NseCircular | null {
     circDepartment: asText(record["Dept_Name"]) || asText(record["Segment_Name"]) || config.bse.segment,
     circDisplayNo: noticeNo,
     circFileSize: "",
-    circFilelink: /^https?:\/\//i.test(fileLink) ? fileLink : "",
+    circFilelink: fileLink,
     circFilename: fileLink.split("/").pop() ?? "",
     circNumber: noticeNo,
     fileDept: "",

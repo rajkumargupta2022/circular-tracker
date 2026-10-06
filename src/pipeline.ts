@@ -9,7 +9,7 @@ import { sendDigest } from "./notify/mailer.js";
 import type { ImportanceLevel, NseCircular, RunSummary } from "./types.js";
 
 export interface RunOptions {
-  /** Window start. Defaults to NSE_LOOKBACK_DAYS before today. */
+  /** Window start for both exchanges. Defaults to NSE_LOOKBACK_DAYS / BSE_LOOKBACK_DAYS before today. */
   from?: Date;
   /** Window end. Defaults to today. */
   to?: Date;
@@ -36,7 +36,11 @@ function levelsToNotify(): ImportanceLevel[] {
  */
 export async function runOnce(options: RunOptions = {}): Promise<RunSummary> {
   const to = options.to ?? new Date();
-  const from = options.from ?? daysAgo(config.nse.lookbackDays, to);
+  // An explicit `from` (--days, backfill) applies to both exchanges; otherwise
+  // each uses its own lookback.
+  const nseFrom = options.from ?? daysAgo(config.nse.lookbackDays, to);
+  const bseFrom = options.from ?? daysAgo(config.bse.lookbackDays, to);
+  const from = nseFrom < bseFrom ? nseFrom : bseFrom;
   const windowFrom = formatNseDate(from);
   const windowTo = formatNseDate(to);
 
@@ -52,6 +56,7 @@ export async function runOnce(options: RunOptions = {}): Promise<RunSummary> {
     byLevel: { CRITICAL: 0, IMPORTANT: 0, ROUTINE: 0 },
     apiDocUpgrades: 0,
     apiDocsNotified: 0,
+    failures: [],
     windowFrom,
     windowTo,
   };
@@ -60,11 +65,11 @@ export async function runOnce(options: RunOptions = {}): Promise<RunSummary> {
     // Each exchange is fetched independently so one outage cannot cost us the
     // other's circulars; only a total failure fails the run.
     const fetched: NseCircular[] = [];
-    const failures: string[] = [];
+    const failures = summary.failures;
 
     log.info(`Fetching NSE ${config.nse.dept} circulars for ${windowFrom} .. ${windowTo}`);
     try {
-      fetched.push(...(await new NseClient().fetchCirculars(from, to)));
+      fetched.push(...(await new NseClient().fetchCirculars(nseFrom, to)));
     } catch (error) {
       failures.push(`NSE: ${String(error)}`);
       log.error(`NSE fetch failed (continuing with other exchanges): ${String(error)}`);
@@ -72,7 +77,7 @@ export async function runOnce(options: RunOptions = {}): Promise<RunSummary> {
 
     log.info(`Fetching BSE ${config.bse.segment} circulars for ${windowFrom} .. ${windowTo}`);
     try {
-      fetched.push(...(await new BseClient().fetchCirculars(from, to)));
+      fetched.push(...(await new BseClient().fetchCirculars(bseFrom, to)));
     } catch (error) {
       failures.push(`BSE: ${String(error)}`);
       log.error(`BSE fetch failed (continuing with other exchanges): ${String(error)}`);
@@ -130,7 +135,9 @@ export async function runOnce(options: RunOptions = {}): Promise<RunSummary> {
       }
     }
 
-    store.finishRun(runId, summary);
+    // A partial failure is still recorded on the run row, so `stats` and the
+    // runs table never show an exchange outage as a clean run.
+    store.finishRun(runId, summary, failures.length > 0 ? `Partial failure — ${failures.join("; ")}` : undefined);
     return summary;
   } catch (error) {
     store.finishRun(runId, summary, String(error));
@@ -154,6 +161,7 @@ export async function backfill(days: number, chunkDays = 30): Promise<RunSummary
     byLevel: { CRITICAL: 0, IMPORTANT: 0, ROUTINE: 0 },
     apiDocUpgrades: 0,
     apiDocsNotified: 0,
+    failures: [],
     windowFrom: formatNseDate(daysAgo(days)),
     windowTo: formatNseDate(new Date()),
   };
@@ -166,6 +174,7 @@ export async function backfill(days: number, chunkDays = 30): Promise<RunSummary
       total.fetched += chunk.fetched;
       total.inserted += chunk.inserted;
       total.duplicates += chunk.duplicates;
+      total.failures.push(...chunk.failures);
       for (const level of ["CRITICAL", "IMPORTANT", "ROUTINE"] as const) {
         total.byLevel[level] += chunk.byLevel[level];
       }
