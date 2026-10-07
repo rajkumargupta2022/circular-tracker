@@ -77,9 +77,6 @@ export const config = {
     lookbackDays: num("BSE_LOOKBACK_DAYS", 7),
     pageUrl: str("BSE_PAGE_URL", "https://www.bseindia.com/markets/marketinfo/noticescirculars"),
     apiUrl: str("BSE_API_URL", "https://api.bseindia.com/BseIndiaAPI/api/getDataAdvance_New/w"),
-    // BSE sits behind Akamai and rejects plain HTTP clients, so we fetch from inside a real page.
-    // Without a display, run under Xvfb (the Dockerfile does) or set BSE_HEADLESS=true.
-    headless: bool("BSE_HEADLESS", false),
     retryDelayMs: num("BSE_RETRY_DELAY_SECONDS", 5) * 1000,
     maxRetries: num("BSE_MAX_RETRIES", 4),
   },

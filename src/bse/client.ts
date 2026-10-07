@@ -1,4 +1,3 @@
-import { chromium } from "playwright";
 import { config } from "../config.js";
 import { log } from "../logger.js";
 import type { NseCircular } from "../types.js";
@@ -66,28 +65,30 @@ export function normalizeBseNotice(value: unknown): NseCircular | null {
   };
 }
 
+/**
+ * BSE's Akamai edge lets plain HTTP through as long as the request looks like an
+ * XHR from bseindia.com (Origin/Referer); it blocks only missing or headless-browser
+ * fingerprints. No cookie bootstrap or real browser is needed.
+ */
 async function fetchPayload(url: string): Promise<unknown> {
-  const browser = await chromium.launch({
-    headless: config.bse.headless,
-    args: ["--disable-dev-shm-usage"],
+  const response = await fetch(url, {
+    headers: {
+      "user-agent": config.nse.userAgent,
+      accept: "application/json, text/plain, */*",
+      "accept-language": "en-US,en;q=0.9",
+      origin: "https://www.bseindia.com",
+      referer: config.bse.pageUrl,
+    },
+    signal: AbortSignal.timeout(20_000),
   });
+  const body = await response.text();
+  if (!response.ok) {
+    throw new Error(`BSE returned HTTP ${response.status}: ${body.slice(0, 300)}`);
+  }
   try {
-    const page = await browser.newPage();
-    await page.goto(config.bse.pageUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
-    const response = await page.evaluate(async (apiUrl) => {
-      const result = await fetch(apiUrl, { signal: AbortSignal.timeout(20_000) });
-      return { status: result.status, body: await result.text() };
-    }, url);
-    if (response.status < 200 || response.status >= 300) {
-      throw new Error(`BSE returned HTTP ${response.status}: ${response.body.slice(0, 300)}`);
-    }
-    try {
-      return JSON.parse(response.body) as unknown;
-    } catch {
-      throw new Error(`BSE returned non-JSON body (${response.body.slice(0, 120)})`);
-    }
-  } finally {
-    await browser.close();
+    return JSON.parse(body) as unknown;
+  } catch {
+    throw new Error(`BSE returned non-JSON body (${body.slice(0, 120)})`);
   }
 }
 
