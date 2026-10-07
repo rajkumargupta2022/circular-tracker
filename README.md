@@ -83,7 +83,7 @@ node dist/cli.js backfill --days 180
 
 ## BSE circulars
 
-BSE notices are fetched alongside NSE for the same date window (`BSE_SEGMENT`, default
+BSE notices are fetched alongside NSE over `BSE_LOOKBACK_DAYS` (`BSE_SEGMENT`, default
 "Mutual Fund", all departments and categories), mapped to the same record shape,
 and pushed through the same dedup → classify → store → digest path. NSE and BSE
 circulars therefore land in one table, are scored by the same rules and Gemini

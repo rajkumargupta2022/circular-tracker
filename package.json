@@ -20,7 +20,7 @@
   "dependencies": {
     "@google-cloud/storage": "^7.21.0",
     "@google/genai": "^2.16.0",
-    "better-sqlite3": "^13.0.3",
+    "better-sqlite3": "^11.7.0",
     "node-cron": "^3.0.3",
     "nodemailer": "^6.9.16"
   },

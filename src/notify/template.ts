@@ -151,7 +151,7 @@ export function buildText(circulars: StoredCircular[]): string {
     for (const circular of items) {
       const reasons = parseJsonArray(circular.importance_reasons);
       lines.push(
-        `[${circular.circCompany}] ${circular.circDisplayNo} — ${circular.cirDisplayDate}`,
+        `[${exchangeLabel([circular])}] ${circular.circDisplayNo} — ${circular.cirDisplayDate}`,
         `  ${circular.sub}`,
         reasons.length > 0 ? `  Why: ${reasons.join("; ")}` : "",
         circular.circFilelink ? `  ${circular.circFilelink}` : "",
