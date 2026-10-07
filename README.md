@@ -90,9 +90,8 @@ circulars therefore land in one table, are scored by the same rules and Gemini
 fallback, and arrive in **one** grouped email (each card is tagged with its exchange
 and links to the PDF). A failure on one exchange is logged and the other still runs.
 
-BSE's API (`api.bseindia.com`) rejects plain HTTP clients, so the fetch runs inside a
-Playwright Chromium page. Locally: `npx playwright install chromium`. In Docker it
-runs under Xvfb; elsewhere set `BSE_HEADLESS=true` if there is no display. To add
+BSE's API (`api.bseindia.com`) is fetched over plain HTTP; it only needs `Origin` and
+`Referer` headers pointing at bseindia.com, so no browser or display is involved. To add
 another exchange, write a client that returns `NseCircular`-shaped records and add
 it to `runOnce` in `src/pipeline.ts`.
 

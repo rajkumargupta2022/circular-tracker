@@ -5,8 +5,6 @@ data/
 .env
 .env.local
 .DS_Store
-BSE_README.md
-BSE_README
 
 # Cloud Run runtime config (copy of env.production.yaml.example with real values)
 env.production.yaml

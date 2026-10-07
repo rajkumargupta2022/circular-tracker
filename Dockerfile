@@ -7,7 +7,6 @@
 FROM node:22-slim AS builder
 
 WORKDIR /app
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 make g++ ca-certificates \
@@ -16,7 +15,6 @@ RUN apt-get update \
 # Copy manifests first so the dependency layer caches across source-only changes.
 COPY package.json package-lock.json ./
 RUN npm ci
-RUN npx playwright install chromium
 
 COPY tsconfig.json ./
 COPY src ./src
@@ -31,7 +29,6 @@ RUN npm prune --omit=dev
 FROM node:22-slim AS runtime
 
 WORKDIR /app
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 ENV NODE_ENV=production \
     # Cloud Run's only writable path is /tmp. STATE_BUCKET syncs this file to
@@ -41,21 +38,19 @@ ENV NODE_ENV=production \
     TZ=Asia/Kolkata
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates tini xvfb xauth \
+    && apt-get install -y --no-install-recommends ca-certificates tini \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /ms-playwright /ms-playwright
-RUN npx playwright install-deps chromium
 
 # node:22-slim ships an unprivileged `node` user; never run as root.
 USER node
 
 # tini reaps zombies and forwards SIGTERM, so `apidoc`/`run` exit promptly and
 # the daemon shuts down cleanly when Cloud Run stops the instance.
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/bin/xvfb-run", "-a", "node", "dist/cli.js"]
+ENTRYPOINT ["/usr/bin/tini", "--", "node", "dist/cli.js"]
 
 # Cloud Run Job default. Override per-job with `--args`, e.g. `--args=apidoc,check`.
 # For a long-running service deployment instead, override the command to `start`.

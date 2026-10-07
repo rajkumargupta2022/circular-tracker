@@ -2,6 +2,8 @@ import { config } from "../config.js";
 import { log } from "../logger.js";
 import type { NseCircular } from "../types.js";
 
+const BSE_NOTICE_BASE = "https://www.bseindia.com/downloads/UploadDocs/Notices/";
+
 const sleep = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
 
 /** BSE's API expects YYYY-MM-DD, in India time. */
@@ -30,6 +32,24 @@ function displayDate(noticeDate: string): string {
 }
 
 /**
+ * Notice attachments live under .../Notices/<noticeNo>/, so a bare or relative
+ * `FileName` resolves against that directory. Only http(s) links on bseindia.com are kept: the
+ * value ends up in an email href, and `javascript:`/`data:` must never get there.
+ * Returns "" when there is no usable link.
+ */
+export function resolveFileLink(fileName: string, noticeNo: string): string {
+  if (!fileName) return "";
+  try {
+    const url = new URL(fileName, `${BSE_NOTICE_BASE}${encodeURIComponent(noticeNo)}/`);
+    const isHttp = url.protocol === "https:" || url.protocol === "http:";
+    const isBse = url.hostname === "bseindia.com" || url.hostname.endsWith(".bseindia.com");
+    return isHttp && isBse ? url.href : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
  * Maps one BSE notice onto the shared circular shape so it flows through the
  * same dedup → classify → store → digest path as NSE. Returns null for records
  * without a notice number or subject, which cannot be stored or classified.
@@ -45,7 +65,7 @@ export function normalizeBseNotice(value: unknown): NseCircular | null {
   if (!noticeNo || !subject) return null;
 
   const noticeDate = asText(record["Notice_Date"]);
-  const fileLink = asText(record["FileName"]);
+  const fileLink = resolveFileLink(asText(record["FileName"]), noticeNo);
   const fileExt = /\.([a-z0-9]+)$/i.exec(fileLink.split("?")[0] ?? "")?.[1]?.toLowerCase() ?? "";
 
   return {

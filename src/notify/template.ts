@@ -91,9 +91,13 @@ export function buildHtml(circulars: StoredCircular[]): string {
             </div>
             ${reasonHtml}
             ${tagHtml}
-            <div style="margin-top:12px;">
+            ${
+              /^https?:[/][/]/i.test(circular.circFilelink)
+                ? `<div style="margin-top:12px;">
               <a href="${escapeHtml(circular.circFilelink)}" style="font:600 13px/1.5 -apple-system,Segoe UI,sans-serif;color:#175cd3;text-decoration:none;">Download circular${circular.fileExt ? ` (${escapeHtml(circular.fileExt.toUpperCase())})` : ""} &rarr;</a>
-            </div>
+            </div>`
+                : ""
+            }
           </td></tr>
         </table>
       </td></tr>`;
@@ -150,7 +154,7 @@ export function buildText(circulars: StoredCircular[]): string {
         `[${circular.circCompany}] ${circular.circDisplayNo} — ${circular.cirDisplayDate}`,
         `  ${circular.sub}`,
         reasons.length > 0 ? `  Why: ${reasons.join("; ")}` : "",
-        `  ${circular.circFilelink}`,
+        circular.circFilelink ? `  ${circular.circFilelink}` : "",
         "",
       );
     }
